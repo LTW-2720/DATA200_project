@@ -1,0 +1,533 @@
+---
+title: "Data200 emipirical project"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Import the library
+
+```{r cars}
+library(tidyverse)
+library(skimr)
+library(dplyr)
+library(ggpubr)
+library(readr)
+library(magrittr)
+library(ggplot2)
+library(readxl)
+library(tidyr)
+library(leaps)
+library(caret)
+```
+
+## Import Data and Data cleaning
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+# import Airbnb NYC dataset
+listings <- read_excel('listings.xlsx')
+listings_d <- read_excel('listings_d.xlsx')
+
+# select the variables of accommodate and reviews score from listing_d and merge with listings
+var <- data.frame(c(listings_d['accommodates'], listings_d['review_scores_rating'], listings_d['id']))
+data <- merge(x=listings, y=var)
+
+```
+
+
+```{r}
+var_f <- c("id", "host_id", "neighbourhood_group","neighbourhood","room_type","price","minimum_nights","reviews_per_month","calculated_host_listings_count","availability_365","number_of_reviews_ltm","latitude","longitude","accommodates","review_scores_rating")
+data1 <- data[var_f]
+sapply(data1, function(x) sum(is.na(x)))
+```
+
+```{r}
+# fill the missing values with mean
+#install.packages('imputeTS')
+library(imputeTS)
+data2 <-  na_mean(data1)
+data2 <- data2 %>% filter(price>0)
+sapply(data2, function(x) sum(is.na(x)))
+sapply(data2, class)
+summary(data2)
+skim_without_charts(data2)
+
+```
+
+## Data Visuallizaition
+```{r}
+#Price
+data2 %>% 
+  ggplot(aes(price)) + geom_histogram(col = "grey", bins = 50) +
+  labs(title = "Airbnb Price in NYC", 
+       x = "Price", y = "Number of Listings") + 
+  theme_grey(base_size = 14) 
+
+```
+```{r}
+# using log(price)
+data3 <- data2[data2$price>0,]
+data3[, 6] <- log(data3[,6])
+sapply(data3, function(x) sum(is.na(x)))
+min(data3$price)
+
+```
+
+```{r}
+# Price
+data3 %>% 
+  ggplot(aes(price)) + geom_histogram(col = "grey", bins = 50) +
+  labs(title = "Airbnb Price in NYC(using logarithm)", 
+       x = "ln(Price)", y = "Number of Listings") + 
+  theme_grey(base_size = 14) 
+```
+
+
+```{r}
+# Price
+data2 %>% filter(price < 1000 & price >0) %>%
+  ggplot(aes(price)) + geom_histogram(col = "grey", bins = 50) +
+  labs(title = "Airbnb Price in NYC(Under $1000)", 
+       x = "Price", y = "Number of Listings") + 
+  theme_grey(base_size = 14) 
+
+```
+```{r}
+freq_neighbour_group <- as.data.frame(cbind(frequency = table(listings$neighbourhood_group),
+                        percentage = prop.table(table(listings$neighbourhood_group))))
+
+freq_neighbour_group <- freq_neighbour_group[order(freq_neighbour_group$frequency, decreasing = TRUE),]
+freq_neighbour_group
+barplot(freq_neighbour_group$frequency,main = 'the number of listings distribution by boroughs', 
+        names.arg = c('Manhattan','Brooklyn','Queens','Staten Island','Bronx'), ylab = 'Frequency')
+```
+```{r}
+freq_room_type <- as.data.frame(cbind(frequency = table(listings$room_type),
+                                      percentage = prop.table(table(listings$room_type))))
+
+freq_room_type
+barplot(freq_room_type$frequency,main = 'the number of listings distribution by room type', 
+        names.arg = c('Entire home/apt','Hotel room','Private room','Shared room '), ylab = 'Frequency')
+```
+
+
+```{r}
+# different district in price
+
+data3 %>%
+  ggplot(aes(fct_reorder(neighbourhood_group, price), price)) +
+  geom_boxplot(fill = "grey") +
+  labs(title = "Price in Boroughs",x = "", y = "ln(Price)") + 
+  theme_bw(base_size = 14)
+
+```  
+
+
+```{r}
+# showing price difference on map 
+data2 %>% filter(price < 1000 & price >0) %>% 
+  ggplot(mapping = aes(x=longitude, y=latitude)) + 
+  geom_point(aes(color=price, size=price, alpha=price)) +
+  labs(title = "Map of Price(under$1000)",x = "longitude", y = "latitude") +
+  scale_fill_gradient(low = "white", high = "yellow") +
+  theme_bw(base_size = 13)
+  
+```
+## Modeling
+
+
+```{r}
+# split the data
+# using ln(price)
+set.seed(666)
+n = nrow(data3)
+train_ind <- sample(1:n, size=round(0.7*n), replace = FALSE)
+train_data <- data3[train_ind, ]
+test_data <- data3[-train_ind,]
+
+# not using ln(price)
+n2 = nrow(data2)
+train_ind2 <- sample(1:n, size=round(0.7*n), replace = FALSE)
+train_data2 <- data2[train_ind2, ]
+test_data2 <- data2[-train_ind2,] 
+
+```
+
+```{r}
+#general linear model 
+model.g <- lm(price ~ 
+               neighbourhood_group + 
+               #neighbourhood +
+               room_type +
+               minimum_nights +
+               reviews_per_month +
+               calculated_host_listings_count  +
+               availability_365 +
+               number_of_reviews_ltm +
+               latitude + 
+               longitude +
+               accommodates +
+               review_scores_rating, 
+             data = data2)
+summary(model.g)
+```
+
+```{r} 
+# linear model using ln(price)
+model1 <- lm(price ~ 
+               neighbourhood_group + 
+               #neighbourhood +
+               room_type +
+               minimum_nights +
+               reviews_per_month +
+               calculated_host_listings_count  +
+               availability_365 +
+               number_of_reviews_ltm +
+               latitude + 
+               longitude +
+               accommodates +
+               review_scores_rating, 
+             data = train_data)
+summary(model1)
+
+#plot(model1)
+
+```
+ 
+
+
+```{r}
+# evalueate the prediction 
+pred1 <- predict(model1, newdata = test_data)
+rmse <- sqrt(mean(test_data$price - pred1)**2)
+sse <- sum((test_data$price - pred1)**2)
+ssr <- sum((pred1 - mean(test_data$price))**2)
+r2 <- 1 - sse/(sse+ssr)
+```
+
+```{r} 
+nbg <- as.numeric(unclass(as.factor(data3$neighbourhood_group)))
+nb <- as.numeric(unclass(as.factor(data3$neighbourhood)))
+rt <- as.numeric(unclass(as.factor(data3$room_type)))
+```
+
+
+```{r}
+ 
+# convert categorical variables to numerical variables
+data4 <- data3
+data4['neighbourhood_group'] <- nbg
+data4['neighbourhood'] <- nb
+data4["room_type"] <- rt
+sapply(data4, typeof)
+```
+## Principle Components Regression
+
+```{r}
+# PCR no process price
+#install.packages("pls")
+library(pls)
+set.seed(666)
+model.pca <- pcr(price ~ 
+               neighbourhood_group + 
+               #neighbourhood +
+               room_type +
+               minimum_nights +
+               reviews_per_month +
+               calculated_host_listings_count  +
+               availability_365 +
+               number_of_reviews_ltm +
+               latitude + 
+               longitude +
+               accommodates +
+               review_scores_rating, 
+               data=train_data2, scale=TRUE, validation="CV")
+
+summary(model.pca)
+
+validationplot(model.pca, val.type = "R2")
+
+pcr_pred <- predict(model.pca, test_data, ncomp=6)
+rmse_pca <- sqrt(mean(test_data2$price - pcr_pred)**2)
+sse_pca <- sum((test_data2$price - pcr_pred)**2)
+ssr_pca <- sum((pcr_pred - mean(test_data2$price))**2)
+r2_pca1 <- 1 - sse_pca/(sse_pca+ssr_pca)
+r2_pca1
+```
+
+
+```{r}
+# PCR using log(price)
+library(pls)
+set.seed(666)
+model.pca <- pcr(price ~ 
+               neighbourhood_group + 
+               #neighbourhood +
+               room_type +
+               minimum_nights +
+               reviews_per_month +
+               calculated_host_listings_count  +
+               availability_365 +
+               number_of_reviews_ltm +
+               latitude + 
+               longitude +
+               accommodates +
+               review_scores_rating, 
+               data=train_data, scale=TRUE, validation="CV")
+
+summary(model.pca)
+
+validationplot(model.pca, val.type = "R2")
+
+pcr_pred <- predict(model.pca, test_data, ncomp=6)
+rmse_pca <- sqrt(mean(test_data$price - pcr_pred)**2)
+sse_pca <- sum((test_data$price - pcr_pred)**2)
+ssr_pca <- sum((pcr_pred - mean(test_data$price))**2)
+r2_pca2 <- 1 - sse_pca/(sse_pca+ssr_pca)
+r2_pca2
+``` 
+## XG Boost
+
+```{r}
+
+# without ln(price)
+library(xgboost)
+
+train_x = data.matrix(train_data2[, c(3:5,7:15)])
+train_y = train_data2[,6]
+
+test_x = data.matrix(test_data2[,  c(3:5,7:15)])
+test_y = test_data2[, 6]
+
+xgb_train = xgb.DMatrix(data = train_x, label = train_y)
+xgb_test = xgb.DMatrix(data = test_x, label = test_y)
+
+xgbc = xgboost(data = xgb_train, max.depth = 20, nrounds = 50)
+print(xgbc)
+
+pred_y = predict(xgbc, xgb_test)
+
+rmse_pca <- sqrt(mean(test_y - pred_y)**2)
+sse_xgb <- sum((test_y - pred_y)**2)
+mse_xgb = mean((test_y - pred_y)^2)
+ssr_xgb <- sum((pred_y - mean(test_y))**2)
+r2_xgb1 <- 1 - sse_xgb/(sse_xgb + ssr_xgb)
+r2_xgb1
+```
+
+
+```{r}
+
+## XG Boost with logarithm process to price
+
+#install.packages("xgboost")
+library(xgboost)
+
+train_x = data.matrix(train_data[, c(3:5,7:15)])
+train_y = train_data[,6]
+
+test_x = data.matrix(test_data[,  c(3:5,7:15)])
+test_y = test_data[, 6]
+
+xgb_train = xgb.DMatrix(data = train_x, label = train_y)
+xgb_test = xgb.DMatrix(data = test_x, label = test_y)
+
+xgbc = xgboost(data = xgb_train, max.depth = 20, nrounds = 50)
+print(xgbc)
+
+pred_y = predict(xgbc, xgb_test)
+
+rmse_pca <- sqrt(mean(test_y - pred_y)**2)
+sse_xgb <- sum((test_y - pred_y)**2)
+mse_xgb = mean((test_y - pred_y)^2)
+ssr_xgb <- sum((pred_y - mean(test_y))**2)
+r2_xgb2 <- 1 - sse_xgb/(sse_xgb + ssr_xgb)
+r2_xgb2
+```
+## Random Forest
+```{r}
+# Random Forest without logarithm process to price
+library(randomForest)
+
+model_rf <- randomForest(price ~ 
+               neighbourhood_group + 
+               #neighbourhood +
+               room_type +
+               minimum_nights +
+               reviews_per_month +
+               calculated_host_listings_count  +
+               availability_365 +
+               number_of_reviews_ltm +
+               latitude + 
+               longitude +
+               accommodates +
+               review_scores_rating, 
+             data = train_data2, ntree=50)
+summary(model_rf)
+
+rf.pred <- predict(model_rf, test_data2)
+
+rmse_rf <- sqrt(mean(test_data2$price - rf.pred)**2)
+sse_rf <- sum((test_data2$price - rf.pred)**2)
+ssr_rf <- sum((rf.pred - mean(test_data2$price))**2)
+r2_rf1 <- 1 - sse_rf/(sse_rf+ssr_rf)
+r2_rf1
+```
+
+```{r}
+# Random Forest with logarithm process to price
+library(randomForest)
+
+model_rf <- randomForest(price ~ 
+               neighbourhood_group + 
+               #neighbourhood +
+               room_type +
+               minimum_nights +
+               reviews_per_month +
+               calculated_host_listings_count  +
+               availability_365 +
+               number_of_reviews_ltm +
+               latitude + 
+               longitude +
+               accommodates +
+               review_scores_rating, 
+             data = train_data, ntree=50)
+summary(model_rf)
+
+rf.pred <- predict(model_rf, test_data)
+
+rmse_rf <- sqrt(mean(test_data$price - rf.pred)**2)
+sse_rf <- sum((test_data$price - rf.pred)**2)
+ssr_rf <- sum((rf.pred - mean(test_data$price))**2)
+r2_rf2 <- 1 - sse_rf/(sse_rf+ssr_rf)
+r2_rf2
+```
+
+
+
+
+
+
+
+## empirical analysis
+
+
+```{r} 
+## Corelation
+corr <- cor(data4[,3:15])
+#install.packages("ggcorrplot")
+library(ggcorrplot)
+ggcorrplot(corr) 
+```
+
+```{r}
+# Overall
+ 
+ enti <- data2 %>% filter(room_type=='Entire home/apt')
+
+ pri <- data2 %>% filter(room_type=='Private room')
+
+ hotel <- data2 %>% filter(room_type=='Hotel room')
+
+ sh <- data2 %>% filter(room_type=='Shared room')
+ 
+
+cor.test(enti$price, enti$availability_365)
+cor.test(pri$price, pri$availability_365)
+cor.test(hotel$price, hotel$availability_365)
+cor.test(sh$price, sh$availability_365)
+```
+
+```{r}
+# Manhattan price v.s. room type
+ Man_enti <- data2 %>% filter(neighbourhood_group=='Manhattan' & room_type=='Entire home/apt')
+
+ Man_pri <- data2 %>% filter(neighbourhood_group=='Manhattan' & room_type=='Private room')
+
+ Man_hotel <- data2 %>% filter(neighbourhood_group=='Manhattan' & room_type=='Hotel room')
+
+ Man_sh <- data2 %>% filter(neighbourhood_group=='Manhattan' & room_type=='Shared room')
+
+cor.test(Man_enti$price, Man_enti$availability_365)
+cor.test(Man_pri$price, Man_pri$availability_365)
+cor.test(Man_hotel$price, Man_hotel$availability_365)
+cor.test(Man_sh$price, Man_sh$availability_365)
+```
+
+```{r}
+# Brooklyn price v.s. room type
+ Brooklyn_enti <- data2 %>% filter(neighbourhood_group=='Brooklyn' & room_type=='Entire home/apt')
+
+ Brooklyn_pri <- data2 %>% filter(neighbourhood_group=='Brooklyn' & room_type=='Private room')
+
+ Brooklyn_hotel <- data2 %>% filter(neighbourhood_group=='Brooklyn' & room_type=='Hotel room')
+
+ Brooklyn_sh <- data2 %>% filter(neighbourhood_group=='Brooklyn' & room_type=='Shared room')
+
+cor.test(Brooklyn_enti$price, Brooklyn_enti$availability_365)
+cor.test(Brooklyn_pri$price, Brooklyn_pri$availability_365)
+cor.test(Brooklyn_hotel$price, Brooklyn_hotel$availability_365)
+cor.test(Brooklyn_sh$price, Brooklyn_sh$availability_365)
+```
+
+```{r}
+# Bronx price v.s. room type
+ Bronx_enti <- data2 %>% filter(neighbourhood_group=='Bronx' & room_type=='Entire home/apt')
+
+ Bronx_pri <- data2 %>% filter(neighbourhood_group=='Bronx' & room_type=='Private room')
+ 
+ Bronx_hotel <- data2 %>% filter(neighbourhood_group=='Bronx' & room_type=='Hotel room')
+ 
+ Bronx_sh <- data2 %>% filter(neighbourhood_group=='Bronx' & room_type=='Shared room')
+
+cor.test(Bronx_enti$price, Bronx_enti$availability_365)
+cor.test(Bronx_pri$price, Bronx_pri$availability_365)
+#cor.test(Bronx_hotel$price, Bronx_hotel$availability_365)
+cor.test(Bronx_sh$price, Bronx_sh$availability_365)
+```
+
+
+```{r}
+# Queens price v.s. room type
+ Queens_enti <- data2 %>% filter(neighbourhood_group=='Queens' & room_type=='Entire home/apt')
+
+ Queens_pri <- data2 %>% filter(neighbourhood_group=='Queens' & room_type=='Private room')
+
+ Queens_hotel <- data2 %>% filter(neighbourhood_group=='Queens' & room_type=='Hotel room')
+
+ Queens_sh <- data2 %>% filter(neighbourhood_group=='Queens' & room_type=='Shared room')
+
+cor.test(Queens_enti$price, Queens_enti$availability_365)
+cor.test(Queens_pri$price, Queens_pri$availability_365)
+cor.test(Queens_hotel$price, Queens_hotel$availability_365)
+cor.test(Queens_sh$price, Queens_sh$availability_365)
+```
+
+```{r}
+# Staten Island price v.s. room type
+ SI_enti <- data2 %>% filter(neighbourhood_group=='Staten Island' & room_type=='Entire home/apt')
+
+ SI_pri <- data2 %>% filter(neighbourhood_group=='Staten Island' & room_type=='Private room')
+
+ SI_hotel <- data2 %>% filter(neighbourhood_group=='Staten Island' & room_type=='Hotel room')
+
+ SI_sh <- data2 %>% filter(neighbourhood_group=='Staten Island' & room_type=='Shared room')
+
+cor.test(SI_enti$price, SI_enti$availability_365)
+cor.test(SI_pri$price, SI_pri$availability_365)
+#cor.test(SI_hotel$price, SI_hotel$availability_365)
+#cor.test(SI_sh$price, SI_sh$availability_365)
+```
+
+
+
+
+
